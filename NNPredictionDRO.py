@@ -103,11 +103,30 @@ class NNPredictionDRO(DROCounterfactual):
         model.load_state_dict(best_state)
         model.weights_cache = model.get_weights_numpy()
         return model
+    
+    def v_D(self,x,p,theta):
+        if p<2:
+            raise ValueError("p must be >= 2")
+        if theta<0:
+            raise ValueError("theta cannot be negative")
+        
+        if theta==0:
+            return self.nominalValue(x)
+        q = 1 / (1 - (1/p))
+
+        x_norm = (np.sum(np.abs(x)**q) +1)
+
+        def g(lam):
+            vals = np.array([self.Phi(lam, modelo, x, p) for modelo in self.modelSample])
+
+            avg_phi = np.mean(vals)
+            return -(-lam*theta + avg_phi )
+        
+        res = minimize_scalar(g,method='bounded',bounds=(math.sqrt(x_norm)/2,1e6))
+        return - res.fun
         
         
     def Phi(self,lam,modelo,x,p):
-        if p<2:
-            raise ValueError("p must be >= 2")
         q = 1 / (1 - (1/p))
         W1 = modelo.weights_cache["fc1_weight"]
         b1 = modelo.weights_cache["fc1_bias"]
@@ -147,34 +166,30 @@ class NNPredictionDRO(DROCounterfactual):
                 z_j = W1_j @ x + b1_j
 
                 if z_j<=0:
-                    def g1(t):
-                        z= np.exp(t)
+                    def g1(z):
                         return W2_j - ((lam*p)**(1-q))*(z**(q-1)) + (lam*p * ((z - z_j)**(p-1))) /(x_norm**(p-1))
-                    solucionEstrella = minimize_scalar(g1,method='brent')
+                    solucionEstrella = minimize_scalar(g1,method='bounded',bounds=(1e-10,1e6))
                     valorEstrella = solucionEstrella.fun
                     if valorEstrella >=0:
                         infimo += 0 
                     else:
-                        zEstrella = np.exp(solucionEstrella.x)
-                        def g2(t):
-                            z = zEstrella + np.exp(t)
+                        zEstrella = solucionEstrella.x
+                        def g2(z):
                             return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z-z_j)**p)) / (x_norm**(p-1))
-                        minimoIntervaloEstrella = minimize_scalar(g2,method='brent')
+                        minimoIntervaloEstrella = minimize_scalar(g2,method='bounded',bounds=(zEstrella,1e6))
                         infimo+= min(minimoIntervaloEstrella.fun,0)
                 else:
-                    def g1(t):
-                        z= z_j + np.exp(t)
+                    def g1(z):
                         return W2_j - ((lam*p)**(1-q))*(z**(q-1)) + (lam*p * ((z - z_j)**(p-1))) /(x_norm**(p-1))
-                    solucionEstrella = minimize_scalar(g1,method='brent')
+                    solucionEstrella = minimize_scalar(g1,method='bounded',bounds=(z_j,1e6))
                     valorEstrella = solucionEstrella.fun
                     if valorEstrella >=0:
                         infimoProvisional =  lam *((z_j**p)/(x_norm**(p-1)))
                     else:
-                        zEstrella = z_j + np.exp(solucionEstrella.x)
-                        def g2(t):
-                            z = zEstrella + np.exp(t)
+                        zEstrella = solucionEstrella.x
+                        def g2(z):
                             return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z-z_j)**p)) / (x_norm**(p-1))
-                        minimoIntervaloEstrella = minimize_scalar(g2,method='brent')
+                        minimoIntervaloEstrella = minimize_scalar(g2,method='bounded',bounds=(zEstrella,1e6))
                         infimoProvisional= min(minimoIntervaloEstrella.fun,lam *((z_j**p)/(x_norm**(p-1))))
                     def g3(z):
                         return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z_j-z)**p)) / (x_norm**(p-1))
@@ -185,13 +200,6 @@ class NNPredictionDRO(DROCounterfactual):
 
         
 
-                
-            
-            
-            
-              
-            
-            
         
 
     

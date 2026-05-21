@@ -3,7 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar
 from joblib import Parallel, delayed
-
+import math
+from tqdm import tqdm
 
 SEED = 1234
 
@@ -63,16 +64,17 @@ class DROCounterfactual(ABC):
         
         if theta==0:
             return self.nominalValue(x)
-        
+        q = 1 / (1 - (1/p))
 
-        def g(t):
-            lam = np.exp(t)
-            vals = Parallel(n_jobs=-1)(delayed(self.Phi)(lam, modelo, x, p) for modelo in self.modelSample)
+        x_norm = (np.sum(np.abs(x)**q) +1)
+
+        def g(lam):
+            vals = np.array([self.Phi(lam, modelo, x, p) for modelo in self.modelSample])
 
             avg_phi = np.mean(vals)
             return -(-lam*theta + avg_phi )
         
-        res = minimize_scalar(g,method='brent')
+        res = minimize_scalar(g,method='bounded',bounds=(math.sqrt(x_norm)/2,1e6))
         return - res.fun
     
     def search(self,x0,p,eps,theta,value=False):
@@ -85,18 +87,12 @@ class DROCounterfactual(ABC):
         if len(idxs) == 0:
             raise ValueError("The value of epsilon must be increased in order to find any candidate")
 
-        # 3. Loop solo sobre candidatos
-        best_val = -np.inf
-        best_x = None
+        results = Parallel(n_jobs=-1)(delayed(lambda i: (self.v_D(self.X[i], p, theta), self.X[i]))(i) for i in idxs)
 
-        for i in idxs:
-            x = self.X[i]
-            val = self.v_D(x,p,theta)
-            if val > best_val:
-                best_val = val
-                best_x = x
+        best_val, best_x = max(results, key=lambda t: t[0])
+
         if value:
-            return best_x,best_val
+            return best_x, best_val
 
         return best_x
 
@@ -116,14 +112,19 @@ class DROCounterfactual(ABC):
         return self.X[idx_sorted[pos]]
 
     def plotPareto(self,perc=[10,20,30,40,50],epsList=[90.0,92.0,94.0,96.0,98.0,100.0],lowTheta=0,highTheta=0.01,p=2):
-        lista_perc = [self.percentile(p) for p in perc]
+        lista_perc = [self.percentile(p) for p in tqdm(perc)]
         lista = []
-        for ind in lista_perc:
+        print("PERCENTILES CALCULADOS")
+        for ind in tqdm(lista_perc):
+            print("CALCULO DEL CONTRAFACTICO DE UN NUEVO INDIVIDUO")
             listaUp = []
             listaLow = []
-            for eps in epsList:
+            for eps in tqdm(epsList):
+                print("CALCULAMOS CON UN NUEVO EPSILON")
                 listaUp.append(self.search(ind,p,eps,lowTheta,True)[1])
+                print("CASO SIN INCERTIDUMBRE CALCULADO")
                 listaLow.append(self.search(ind,p,eps,highTheta,True)[1])
+                print("CASO CON INCERTIDUMBRE CALCULADO")
             lista.append((listaUp,listaLow))
         
         plt.figure(figsize=(8, 5))
