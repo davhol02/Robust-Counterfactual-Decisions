@@ -24,7 +24,7 @@ class LinearRegressionDRO(DROCounterfactual):
         if p==1:
             factor = max(np.linalg.norm(x, ord=np.inf),1)
         else:
-            q = 1 / (1 - (1/p))
+            q = p / (p-1)
             factor = (np.sum(np.abs(x)**q) +1) ** (1/q)
         return - (theta * factor) + self.nominalValue(x)
     

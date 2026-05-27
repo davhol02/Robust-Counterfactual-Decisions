@@ -5,8 +5,9 @@ from scipy.optimize import minimize_scalar
 from joblib import Parallel, delayed
 import math
 from tqdm import tqdm
+import seaborn as sns
 
-SEED = 1234
+SEED = 2026
 
 class DROCounterfactual(ABC):
 
@@ -19,7 +20,7 @@ class DROCounterfactual(ABC):
     def train(self, X_s, Y_s, seed):
         pass
 
-    def fit(self, N=100):
+    def fit(self, N=50):
         data_l = self.X.shape[0]
 
         # 1. Semilla maestra
@@ -64,7 +65,7 @@ class DROCounterfactual(ABC):
         
         if theta==0:
             return self.nominalValue(x)
-        q = 1 / (1 - (1/p))
+        q = p / (p-1)
 
         x_norm = (np.sum(np.abs(x)**q) +1)
 
@@ -77,11 +78,23 @@ class DROCounterfactual(ABC):
         res = minimize_scalar(g,method='bounded',bounds=(math.sqrt(x_norm)/2,1e6))
         return - res.fun
     
-    def search(self,x0,p,eps,theta,value=False):
+
+    def d(self,x1, x2, non_actionables=None):
+        if non_actionables is None:
+            non_actionables = []
+
+        mask = np.ones_like(x1, dtype=bool)
+        mask[non_actionables] = False
+
+        diff = (x1 - x2)[mask]
+
+        return np.linalg.norm(diff, ord=1) + np.linalg.norm(diff, ord=0)
+    
+    def search(self,x0,p,eps,theta,value=False,non_actionables=None):
         #Se va a considerar la distancia entre x como ||.||_1 + ||.||_0
         d = lambda x1,x2 : np.linalg.norm(x1-x2, ord=1) + np.linalg.norm(x1-x2, ord=0)
 
-        dist = np.array([d(x, x0) for x in self.X])
+        dist = np.array([self.d(x, x0,non_actionables) for x in self.X])
         # 2. Filtramos candidatos
         idxs = np.where(dist <= eps)[0]
         if len(idxs) == 0:
@@ -178,10 +191,41 @@ class DROCounterfactual(ABC):
                 alpha=0.2
             )
 
-        plt.xlabel("x")
-        plt.ylabel("value")
+        plt.xlabel("Maximum x distance")
+        plt.ylabel("v_D(x)")
         plt.grid(True)
         plt.legend()
+        plt.show()
+
+    def plot_heatmap(self,col_labels,p=2,perc=20,theta=1,epsList=[100.0,98.0,96.0,94.0,91.0,90.0]):
+        indPerc = self.percentile(perc)
+        lista = []
+        for eps in epsList:
+            lista.append(self.search(indPerc,p,eps,theta))
+        lista = np.array(lista)
+      
+        # Compute B - a (subtract row-wise)
+        diff_matrix = lista - indPerc
+        
+        # Create the heatmap
+        plt.figure(figsize=(10, 6))
+        sns.heatmap(
+            diff_matrix,
+            vmin=-1, vmax=1,
+            cmap="coolwarm",
+            annot=False,
+            fmt=".2f",
+            linewidths=0.5,
+            xticklabels=col_labels,
+            yticklabels=epsList
+        )
+        plt.xlabel("Features")
+        plt.ylabel("Maximum x-distance")
+
+        # Rotate column labels
+        plt.xticks(rotation=90, fontsize=5)
+        plt.yticks(rotation=0, fontsize=10)
+        plt.tight_layout()
         plt.show()
 
 

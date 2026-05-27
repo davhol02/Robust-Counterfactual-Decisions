@@ -32,7 +32,7 @@ class SimpleNN(nn.Module):
 
 class NNPredictionDRO(DROCounterfactual):
 
-    def __init__(self,X,y,m=16,lr=1e-3,epochs=1000,weight_decay=1e-4, patience=50, val_split=0.2):
+    def __init__(self,X,y,m=8,lr=1e-3,epochs=1000,weight_decay=1e-4, patience=50, val_split=0.2):
         super().__init__(X,y)
         self.m = m
         self.lr = lr
@@ -112,7 +112,7 @@ class NNPredictionDRO(DROCounterfactual):
         
         if theta==0:
             return self.nominalValue(x)
-        q = 1 / (1 - (1/p))
+        q = p / (p-1)
 
         x_norm = (np.sum(np.abs(x)**q) +1)
 
@@ -121,10 +121,22 @@ class NNPredictionDRO(DROCounterfactual):
 
             avg_phi = np.mean(vals)
             return -(-lam*theta + avg_phi )
-        
-        res = minimize_scalar(g,method='bounded',bounds=(math.sqrt(x_norm)/2,1e6))
+        if p==2:
+            res = minimize_scalar(g,method='bounded',bounds=(math.sqrt(x_norm)/2,1e6))
+        else:
+            res = minimize_scalar(g,method='bounded',bounds=(1e-12,1e6))
         return - res.fun
         
+    def objective_function_derivative(self,lam,p,W2_j,q,z_j,x_norm,z):
+        return W2_j - ((lam*p)**(1-q))*(z**(q-1)) + (lam*p * ((z - z_j)**(p-1))) /(x_norm**(p-1))
+    
+    def objective_function(self,lam,p,W2_j,q,z_j,x_norm,z):
+        return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*(np.abs(z - z_j)**p)) / (x_norm**(p-1))
+    
+    
+
+
+     
         
     def Phi(self,lam,modelo,x,p):
         q = 1 / (1 - (1/p))
@@ -159,6 +171,9 @@ class NNPredictionDRO(DROCounterfactual):
                     infimo += min(alt,lam *((max(0,z_j)**2)/(x_norm)))
             return res + infimo
         else:
+            if lam==0:
+                infimo += - np.inf
+                return infimo
             for j in range(W1.shape[0]):
                 W1_j = W1[j]
                 b1_j = b1[j]
@@ -166,35 +181,33 @@ class NNPredictionDRO(DROCounterfactual):
                 z_j = W1_j @ x + b1_j
 
                 if z_j<=0:
-                    def g1(z):
-                        return W2_j - ((lam*p)**(1-q))*(z**(q-1)) + (lam*p * ((z - z_j)**(p-1))) /(x_norm**(p-1))
-                    solucionEstrella = minimize_scalar(g1,method='bounded',bounds=(1e-10,1e6))
+                    solucionEstrella = minimize_scalar(lambda z : self.objective_function_derivative(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(0,1e8))
                     valorEstrella = solucionEstrella.fun
                     if valorEstrella >=0:
                         infimo += 0 
                     else:
                         zEstrella = solucionEstrella.x
-                        def g2(z):
-                            return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z-z_j)**p)) / (x_norm**(p-1))
-                        minimoIntervaloEstrella = minimize_scalar(g2,method='bounded',bounds=(zEstrella,1e6))
+                        minimoIntervaloEstrella = minimize_scalar(lambda z: self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(zEstrella,1e8))
                         infimo+= min(minimoIntervaloEstrella.fun,0)
                 else:
-                    def g1(z):
-                        return W2_j - ((lam*p)**(1-q))*(z**(q-1)) + (lam*p * ((z - z_j)**(p-1))) /(x_norm**(p-1))
-                    solucionEstrella = minimize_scalar(g1,method='bounded',bounds=(z_j,1e6))
+                    solucionEstrella = minimize_scalar(lambda z : self.objective_function_derivative(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(z_j,1e8))
                     valorEstrella = solucionEstrella.fun
                     if valorEstrella >=0:
-                        infimoProvisional =  lam *((z_j**p)/(x_norm**(p-1)))
+                        infimoDerecho =  self.objective_function(lam,p,W2_j,q,z_j,x_norm,z_j)
                     else:
                         zEstrella = solucionEstrella.x
-                        def g2(z):
-                            return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z-z_j)**p)) / (x_norm**(p-1))
-                        minimoIntervaloEstrella = minimize_scalar(g2,method='bounded',bounds=(zEstrella,1e6))
-                        infimoProvisional= min(minimoIntervaloEstrella.fun,lam *((z_j**p)/(x_norm**(p-1))))
-                    def g3(z):
-                        return W2_j*z - (1/q)*((lam*p)**(1-q))*(z**q) + (lam*((z_j-z)**p)) / (x_norm**(p-1))
-                    solucionIzquierda = minimize_scalar(g3,method='bounded',bounds=(1e-12, z_j - 1e-12))
-                    infimo += min(infimoProvisional,solucionIzquierda.fun,g3(z_j)) 
+                        minimoIntervaloEstrella = minimize_scalar(lambda z: self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(zEstrella,1e8))
+                        infimoDerecho= min(minimoIntervaloEstrella.fun,self.objective_function(lam,p,W2_j,q,z_j,x_norm,z_j))
+                    solucionIzquierda = minimize_scalar(lambda z:self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(0, z_j ))
+                    C1 = (q-1)*((lam*p)**(1-q))
+                    C2 = (lam*p*p-1)/(x_norm**(p-1))
+                    aux = ((p-1)**(p-2))*((z_j/p)**(p-q))
+                    if aux > (C1/C2):
+                        solucionIzquierda = minimize_scalar(lambda z:self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(0, z_j ))
+                        infimoIzquierdo = min(solucionIzquierda.fun,self.objective_function(lam,p,W2_j,q,z_j,x_norm,0))
+                    else:
+                        infimoIzquierdo = self.objective_function(lam,p,W2_j,q,z_j,x_norm,0)
+                    infimo += min(infimoIzquierdo,infimoDerecho) 
             return res + infimo
 
 
