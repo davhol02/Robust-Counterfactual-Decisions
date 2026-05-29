@@ -41,29 +41,27 @@ class LogisticRegressionDRO(DROCounterfactual):
         if p<1:
             raise ValueError("p must be >= 1")
         z_i = modelo.decision_function([x])[0]
-        if lam==0:
+        if np.isclose(lam,0):
             return 0
         
         if p==1:
-            if lam>= (1/4):
+            newLam = lam/(max(np.linalg.norm(x, ord=np.inf),1))
+            if newLam>= (1/4):
                 return expit(z_i)
-            zMin = math.log((1-2*lam - math.sqrt(1-4*lam))/(2*lam))
+            zMin = math.log((1-2*newLam - math.sqrt(1-4*newLam))/(2*newLam))
             if z_i < zMin:
                 return expit(z_i)
-            zMax = math.log((1-2*lam + math.sqrt(1-4*lam))/(2*lam))
+            zMax = math.log((1-2*newLam + math.sqrt(1-4*newLam))/(2*newLam))
             if zMin <= z_i <= zMax:
-                return (1 - 2*lam - math.sqrt(1 - 4*lam))/(1 - math.sqrt(1 - 4*lam)) + lam* (z_i - zMin)
+                return (1 - 2*newLam - math.sqrt(1 - 4*newLam))/(1 - math.sqrt(1 - 4*newLam)) + newLam* (z_i - zMin)
             if z_i > zMax:
-                return min(expit(z_i), (1 - 2*lam - math.sqrt(1 - 4*lam))/(1 - math.sqrt(1 - 4*lam)) + lam* (z_i - zMin))
+                return min(expit(z_i), (1 - 2*newLam - math.sqrt(1 - 4*newLam))/(1 - math.sqrt(1 - 4*newLam)) + newLam* (z_i - zMin))
         else:
             q = p / (p-1)
             x_norm = (np.sum(np.abs(x)**q) +1)
             R = x_norm / ((4*lam*p)**(1/(p-1)))
-            if z_i==R:
-                return self.objective_function(lam,p,z_i,x_norm,0)
-            else:
-                solucion = minimize_scalar(lambda z: self.objective_function(lam,p,z_i,x_norm,z),method='bounded',bounds=(z_i-R,z_i))
-                return solucion.fun
+            solucion = minimize_scalar(lambda z: self.objective_function(lam,p,z_i,x_norm,z),method='bounded',bounds=(z_i-R,z_i))
+            return solucion.fun
             
     
     

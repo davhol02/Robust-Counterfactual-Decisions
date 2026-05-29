@@ -139,13 +139,15 @@ class NNPredictionDRO(DROCounterfactual):
      
         
     def Phi(self,lam,modelo,x,p):
-        q = 1 / (1 - (1/p))
+        q = p/(p-1)
         W1 = modelo.weights_cache["fc1_weight"]
         b1 = modelo.weights_cache["fc1_bias"]
         W2 = modelo.weights_cache["fc2_weight"]
         b2 = modelo.weights_cache["fc2_bias"]
         res = -(1/q) * ((lam*p)**(1-q)) + b2
         x_norm = (np.sum(np.abs(x)**q) +1)
+        if lam==0:
+            return - np.inf
         
         infimo=0
         if p==2:
@@ -158,10 +160,10 @@ class NNPredictionDRO(DROCounterfactual):
                 if 4*(lam**2) < x_norm:
                     infimo += - np.inf
                     return infimo
-                if (4*(lam**2) == x_norm) and (W2_j < (z_j/math.sqrt(x_norm))):
+                if  np.isclose(4*(lam**2),x_norm) and (W2_j < (z_j/math.sqrt(x_norm))):
                     infimo += - np.inf
                     return infimo
-                if (4*(lam**2) == x_norm) and (W2_j >= (z_j/math.sqrt(x_norm))):
+                if np.isclose(4*(lam**2),x_norm) and (W2_j >= (z_j/math.sqrt(x_norm))):
                     infimo += lam *((max(0,z_j)**2)/(x_norm))
                 if (4*(lam**2) > x_norm) and ((-W2_j*x_norm + 2*lam*z_j) < 0):
                     infimo += lam *((max(0,z_j)**2)/(x_norm))
@@ -171,9 +173,7 @@ class NNPredictionDRO(DROCounterfactual):
                     infimo += min(alt,lam *((max(0,z_j)**2)/(x_norm)))
             return res + infimo
         else:
-            if lam==0:
-                infimo += - np.inf
-                return infimo
+            
             for j in range(W1.shape[0]):
                 W1_j = W1[j]
                 b1_j = b1[j]
@@ -198,9 +198,8 @@ class NNPredictionDRO(DROCounterfactual):
                         zEstrella = solucionEstrella.x
                         minimoIntervaloEstrella = minimize_scalar(lambda z: self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(zEstrella,1e8))
                         infimoDerecho= min(minimoIntervaloEstrella.fun,self.objective_function(lam,p,W2_j,q,z_j,x_norm,z_j))
-                    solucionIzquierda = minimize_scalar(lambda z:self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(0, z_j ))
                     C1 = (q-1)*((lam*p)**(1-q))
-                    C2 = (lam*p*p-1)/(x_norm**(p-1))
+                    C2 = (lam*p*(p-1))/(x_norm**(p-1))
                     aux = ((p-1)**(p-2))*((z_j/p)**(p-q))
                     if aux > (C1/C2):
                         solucionIzquierda = minimize_scalar(lambda z:self.objective_function(lam,p,W2_j,q,z_j,x_norm,z),method='bounded',bounds=(0, z_j ))

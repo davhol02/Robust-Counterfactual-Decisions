@@ -197,6 +197,82 @@ class DROCounterfactual(ABC):
         plt.legend()
         plt.show()
 
+
+    def plotParetoNominal(self,perc=[10,20,30,40,50],epsList=[90.0,92.0,94.0,96.0,98.0,100.0],lowTheta=0,highTheta=0.01,p=2):
+        lista_perc = [self.percentile(p) for p in tqdm(perc)]
+        lista = []
+        print("PERCENTILES CALCULADOS")
+        for ind in tqdm(lista_perc):
+            print("CALCULO DEL CONTRAFACTICO DE UN NUEVO INDIVIDUO")
+            listaUp = []
+            listaLow = []
+            for eps in tqdm(epsList):
+                print("CALCULAMOS CON UN NUEVO EPSILON")
+                valor1 = self.nominalValue(self.search(ind,p,eps,lowTheta,False))
+                listaUp.append(valor1)
+                print("CASO SIN INCERTIDUMBRE CALCULADO")
+                valor2 = self.nominalValue(self.search(ind,p,eps,highTheta,False))
+                listaLow.append(valor2)
+                print("CASO CON INCERTIDUMBRE CALCULADO")
+            lista.append((listaUp,listaLow))
+        
+        plt.figure(figsize=(8, 5))
+
+        n = len(perc)
+
+        labels = [f"Percentile {i}" for i in perc]
+
+        if n!=5:
+            colors = plt.cm.viridis(np.linspace(0, 1, n))
+        else:
+            colors = ["red","yellow","green","blue","purple"]
+        for i, (y_up, y_low) in enumerate(lista):
+
+            # línea superior (sólida)
+            plt.plot(
+                epsList, y_up,
+                color=colors[i],
+                linestyle='-',
+                label=labels[i]
+            )
+
+            # línea inferior (discontinua)
+            plt.plot(
+                epsList, y_low,
+                color=colors[i],
+                linestyle='--'
+            )
+
+            # puntos superiores (rellenos)
+            plt.plot(
+                epsList, y_up,
+                'o',
+                color=colors[i],
+                markerfacecolor=colors[i]
+            )
+
+            # puntos inferiores (vacíos)
+            plt.plot(
+                epsList, y_low,
+                'o',
+                color=colors[i],
+                markerfacecolor='none',
+                markeredgecolor=colors[i]
+            )
+
+            # sombreado entre curvas
+            plt.fill_between(
+                epsList, y_low, y_up,
+                color=colors[i],
+                alpha=0.2
+            )
+
+        plt.xlabel("Maximum x distance")
+        plt.ylabel("Mean of scores over the nominal distribution")
+        plt.grid(True)
+        plt.legend()
+        plt.show()    
+
     def plot_heatmap(self,col_labels,p=2,perc=20,theta=1,epsList=[100.0,98.0,96.0,94.0,91.0,90.0]):
         indPerc = self.percentile(perc)
         lista = []

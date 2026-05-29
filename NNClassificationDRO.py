@@ -116,38 +116,87 @@ class NNClassificationDRO(DROCounterfactual):
     def inner_objective_function(self,lam,p,z_i,x_norm,z):
         return expit(z) + lam*((z_i - z)**p/(x_norm**(p-1)))
     
-    
 
-    def innerInfimum(self,lam,modelo,x,p):
-        if p<1:
+
+    def innerInfimum(self, lam, modelo, x, p):
+        if p < 1:
             raise ValueError("p must be >= 1")
+
         W2 = modelo.weights_cache["fc2_weight"]
         b2 = modelo.weights_cache["fc2_bias"]
+        z_i = W2 @ x + b2
 
-        z_i = W2 @x + b2
-        if lam==0:
+        if np.isclose(lam, 0):
             return 0
-        
-        if p==1:
-            if lam>= (1/4):
+
+        if p == 1:
+            norm_x = max(np.linalg.norm(x, ord=np.inf), 1.0)
+            newLam = lam / norm_x
+
+            if newLam <= 0:
                 return expit(z_i)
-            zMin = math.log((1-2*lam - math.sqrt(1-4*lam))/(2*lam))
+
+            disc = 1 - 4 * newLam
+
+            if disc <= 1e-12:
+                return expit(z_i)
+
+            sqrt_disc = math.sqrt(disc)
+
+            denom = 2 * newLam
+            if denom <= 0:
+                return expit(z_i)
+            num_min = 1 - 2 * newLam - sqrt_disc
+            val_min = num_min / denom
+
+            if val_min <= 0 or np.isnan(val_min):
+                return expit(z_i)
+
+            zMin = math.log(val_min)
+
             if z_i < zMin:
                 return expit(z_i)
-            zMax = math.log((1-2*lam + math.sqrt(1-4*lam))/(2*lam))
+
+            num_max = 1 - 2 * newLam + sqrt_disc
+            val_max = num_max / denom
+
+            if val_max <= 0 or np.isnan(val_max):
+                return expit(z_i)
+
+            zMax = math.log(val_max)
+
             if zMin <= z_i <= zMax:
-                return (1 - 2*lam - math.sqrt(1 - 4*lam))/(1 - math.sqrt(1 - 4*lam)) + lam* (z_i - zMin)
+                denom2 = 1 - math.sqrt(disc)
+                if np.isclose(denom2, 0):
+                    return expit(z_i)
+
+                return (
+                    (1 - 2 * newLam - sqrt_disc) / denom2
+                    + newLam * (z_i - zMin)
+                )
+
             if z_i > zMax:
-                return min(expit(z_i), (1 - 2*lam - math.sqrt(1 - 4*lam))/(1 - math.sqrt(1 - 4*lam)) + lam* (z_i - zMin))
+                lin = (
+                    (1 - 2 * newLam - sqrt_disc) / (1 - math.sqrt(disc))
+                    + newLam * (z_i - zMin)
+                )
+                return min(expit(z_i), lin)
+
+            return expit(z_i)
+
         else:
-            q = p / (p-1)
-            x_norm = (np.sum(np.abs(x)**q) +1)
-            R = x_norm / ((4*lam*p)**(1/(p-1)))
-            if z_i==R:
-                return self.objective_function(lam,p,z_i,x_norm,0)
-            else:
-                solucion = minimize_scalar(lambda z: self.inner_objective_function(lam,p,z_i,x_norm,z),method='bounded',bounds=(z_i-R,z_i))
-                return solucion.fun
+            q = p / (p - 1)
+            x_norm = (np.sum(np.abs(x) ** q) + 1)
+
+            R = x_norm / ((4 * lam * p) ** (1 / (p - 1)))
+
+            solucion = minimize_scalar(
+                lambda z: self.inner_objective_function(lam, p, z_i, x_norm, z),
+                method='bounded',
+                bounds=(z_i - R, z_i)
+            )
+
+            return solucion.fun
             
     def constraint(self,z, z0, p, M):
         return M - np.sum(np.abs(z - z0)**p)
@@ -157,10 +206,10 @@ class NNClassificationDRO(DROCounterfactual):
         infimo_z_2 = self.innerInfimum(lam,modelo,x,p)
         if p>1:
             q = p / (p-1)
-            x_norm = (np.sum(np.abs(x)**q) +1)
+            den = (np.sum(np.abs(x)**q) +1)**(p-1)
         else:
-            x_norm = (np.linalg.norm(x, ord=np.inf) + 1)
-        penalty = lam*(np.sum(np.abs(z-z0)**p) / (x_norm**(p-1)))
+            den = max(np.linalg.norm(x, ord=np.inf),1)
+        penalty = lam*(np.sum(np.abs(z-z0)**p) / (den))
         return infimo_z_2 + penalty
 
     
@@ -169,17 +218,17 @@ class NNClassificationDRO(DROCounterfactual):
 
 
     def Phi(self,lam,modelo,x,p):
-        if lam==0:
+        if np.isclose(lam,0):
             return 0
         W1 = modelo.weights_cache["fc1_weight"]
         b1 = modelo.weights_cache["fc1_bias"]
         z0 = W1 @ x + b1
         if p>1:
             q = p / (p-1)
-            x_norm = (np.sum(np.abs(x)**q) +1)
+            num = (np.sum(np.abs(x)**q) +1)**(p-1)
         else:
-            x_norm = (np.linalg.norm(x, ord=np.inf) + 1)
-        M= (x_norm **(p-1))/lam
+            num = max(np.linalg.norm(x, ord=np.inf),1)
+        M= num/lam
         cons = {'type': 'ineq','fun': lambda z: self.constraint(z,z0,p,M)}
         minim = minimize(lambda z: self.objective_function(lam,modelo,p,z,z0),z0,constraints=cons)
         return minim.fun
